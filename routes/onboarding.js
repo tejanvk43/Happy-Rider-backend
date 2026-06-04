@@ -122,27 +122,74 @@ router.post('/firebase-verify',
   }
 );
 
+
 /**
  * @POST /api/onboarding/account
  * Create user account with a securely hashed password.
  */
-router.post('/account',
+router.post(
+  '/account',
+
   body('username').isLength({ min: 3 }).trim(),
   body('password').isLength({ min: 6 }).trim(),
   body('phoneNumber').isMobilePhone('en-IN').trim(),
+
   async (req, res) => {
+
     const errors = validationResult(req);
+
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      console.log('Validation errors:', errors.array());
+
+      return res.status(400).json({
+        success: false,
+        errors: errors.array(),
+      });
     }
 
     try {
+
       const { username, password, phoneNumber } = req.body;
 
-      // Hash password with bcrypt (12 salt rounds)
+      console.log('============================');
+      console.log('ACCOUNT CREATION STARTED');
+      console.log('username:', username);
+      console.log('phoneNumber:', phoneNumber);
+
+      // Check if driver exists
+      const { data: existingDriver, error: fetchError } = await supabase
+        .from('drivers')
+        .select('*')
+        .eq('phone', phoneNumber)
+        .maybeSingle();
+
+      console.log('Existing driver:', existingDriver);
+
+      if (fetchError) {
+        console.error('Fetch driver error:', fetchError);
+
+        return res.status(500).json({
+          success: false,
+          error: fetchError.message,
+          details: fetchError,
+        });
+      }
+
+      if (!existingDriver) {
+        return res.status(404).json({
+          success: false,
+          error: 'Driver not found',
+        });
+      }
+
+      // Hash password
+      console.log('Hashing password...');
+
       const hashedPassword = await bcrypt.hash(password, 12);
 
-      // Update driver with account details
+      console.log('Password hashed successfully');
+
+      // Update account
       const { data, error } = await supabase
         .from('drivers')
         .update({
@@ -154,14 +201,40 @@ router.post('/account',
         })
         .eq('phone', phoneNumber)
         .select()
-        .single();
+        .maybeSingle();
 
-      if (error) throw error;
+      if (error) {
 
-      res.json({ success: true, driver: data });
+        console.error('============================');
+        console.error('SUPABASE UPDATE ERROR');
+        console.error(error);
+
+        return res.status(500).json({
+          success: false,
+          error: error.message,
+          details: error,
+        });
+      }
+
+      console.log('============================');
+      console.log('ACCOUNT CREATED SUCCESSFULLY');
+      console.log(data);
+
+      return res.json({
+        success: true,
+        driver: data,
+      });
+
     } catch (error) {
-      console.error('Account creation error:', error);
-      res.status(500).json({ error: error.message });
+
+      console.error('============================');
+      console.error('ACCOUNT CREATION CRASH');
+      console.error(error);
+
+      return res.status(500).json({
+        success: false,
+        error: error.message,
+      });
     }
   }
 );
