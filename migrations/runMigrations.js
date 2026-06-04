@@ -32,12 +32,13 @@ async function runMigrations() {
         .filter(stmt => stmt.length > 0);
 
       for (const statement of statements) {
-        await supabase.rpc('exec_sql', { sql: statement }).catch(error => {
+        const { error } = await supabase.rpc('exec_sql', { sql: statement });
+        if (error) {
           // Ignore "does not exist" errors as they're expected on re-runs
           if (!error.message.includes('does not exist')) {
             throw error;
           }
-        });
+        }
       }
 
       console.log(`✓ Migration completed: ${file}`);

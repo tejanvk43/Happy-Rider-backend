@@ -1,27 +1,46 @@
+/**
+ * upload.js  — Multer middleware configuration
+ *
+ * WHY memoryStorage:
+ *  - Render has an ephemeral filesystem; writing to disk is unreliable.
+ *  - We stream the buffer directly to Supabase Storage.
+ *  - No temp file cleanup needed.
+ *
+ * WHY fileFilter:
+ *  - Reject invalid MIME types BEFORE they hit any route handler.
+ *  - Prevents PDFs, executables, etc. from being processed.
+ *
+ * WHY 5MB limit (not 10MB):
+ *  - KYC document photos should be small for fast uploads on 4G.
+ *  - 5MB is more than enough for a high-quality phone photo.
+ */
+
 const multer = require('multer');
-const path = require('path');
 
-const MAX_FILE_SIZE = parseInt(process.env.MAX_FILE_SIZE || 10485760, 10); // 10MB default
-const ALLOWED_MIME_TYPES = process.env.ALLOWED_MIME_TYPES?.split(',') || [
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+
+const ALLOWED_MIME_TYPES = new Set([
   'image/jpeg',
-  'image/png',
   'image/jpg',
-  'application/pdf',
-];
+  'image/png',
+]);
 
-// Configure storage
 const storage = multer.memoryStorage();
 
-// File filter
 const fileFilter = (req, file, cb) => {
-  if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+  if (ALLOWED_MIME_TYPES.has(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error(`Invalid file type: ${file.mimetype}`), false);
+    cb(
+      Object.assign(
+        new Error(`File type "${file.mimetype}" is not allowed. Use JPG or PNG.`),
+        { statusCode: 400 }
+      ),
+      false
+    );
   }
 };
 
-// Create multer instance
 const upload = multer({
   storage,
   limits: { fileSize: MAX_FILE_SIZE },

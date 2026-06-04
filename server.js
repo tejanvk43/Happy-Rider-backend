@@ -106,7 +106,7 @@ app.use((error, req, res, next) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(
-    `✓ Happi Riders backend running on PORT {PORT}`
+    `✓ Happi Riders backend running on PORT ${PORT}`
   );
 
   console.log(
