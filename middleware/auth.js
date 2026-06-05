@@ -1,28 +1,19 @@
 /**
  * backend/middleware/auth.js
  *
- * JWT Authentication Middleware
+ * Supabase JWT Authentication Middleware
  *
- * After successful OTP verification the backend issues a signed JWT.
- * This middleware validates the token on all protected routes and
- * attaches the driver identity (driverId, phone) to the request.
+ * Verifies the Supabase-issued access token on protected routes.
+ * Uses supabase.auth.getUser(token) — this validates the JWT signature
+ * and returns the authenticated user's data.
  *
- * Phone consistency check:
- *   If the request body or URL params contain a phoneNumber,
- *   it MUST match the phone embedded in the JWT. This prevents
- *   one authenticated user from modifying another user's data.
+ * Sets req.supabaseUser, req.driverPhone on the request.
+ * Also checks phone consistency if a phoneNumber is provided in the request.
  */
 
-const jwt = require('jsonwebtoken');
+const supabase = require('../config/supabase');
 
-function requireAuth(req, res, next) {
-  const secret = process.env.JWT_SECRET;
-
-  if (!secret || secret === 'your_jwt_secret_here') {
-    console.error('[Auth] FATAL: JWT_SECRET is not configured.');
-    return res.status(500).json({ success: false, error: 'Server misconfiguration' });
-  }
-
+async function requireAuth(req, res, next) {
   // ── Extract token ────────────────────────────────────────────────────────
   const authHeader = req.headers.authorization;
 
@@ -36,20 +27,29 @@ function requireAuth(req, res, next) {
   const token = authHeader.split(' ')[1];
 
   try {
-    const decoded = jwt.verify(token, secret);
+    // Verify the Supabase JWT and get the user
+    const { data: { user }, error } = await supabase.auth.getUser(token);
 
-    // Attach driver identity to request
-    req.driverId = decoded.driverId;
-    req.driverPhone = decoded.phone;
+    if (error || !user) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid or expired session. Please verify your phone number again.',
+      });
+    }
+
+    // Attach user data to request
+    req.supabaseUser = user;
+
+    // Extract phone — Supabase stores as +919999999999, our DB stores as 9999999999
+    const rawPhone = user.phone || '';
+    req.driverPhone = rawPhone.startsWith('+91') ? rawPhone.slice(3) : rawPhone;
 
     // ── Phone consistency check ──────────────────────────────────────────
-    // If the request provides a phoneNumber (body or URL param), ensure it
-    // matches the authenticated session. Prevents cross-account access.
     const bodyPhone = req.body && req.body.phoneNumber;
     const paramPhone = req.params && req.params.phoneNumber;
     const requestPhone = bodyPhone || paramPhone;
 
-    if (requestPhone && requestPhone !== decoded.phone) {
+    if (requestPhone && requestPhone !== req.driverPhone) {
       return res.status(403).json({
         success: false,
         error: 'Phone number does not match authenticated session.',
@@ -58,15 +58,10 @@ function requireAuth(req, res, next) {
 
     next();
   } catch (err) {
-    if (err.name === 'TokenExpiredError') {
-      return res.status(401).json({
-        success: false,
-        error: 'Session expired. Please verify your phone number again.',
-      });
-    }
+    console.error('[Auth Middleware] Error verifying token:', err);
     return res.status(401).json({
       success: false,
-      error: 'Invalid authentication token.',
+      error: 'Authentication failed.',
     });
   }
 }
