@@ -58,12 +58,13 @@ router.post('/phone',
 
       const { data: existingDriver } = await supabase
         .from('drivers')
-        .select('id, phone')
+        .select('id, phone, onboarding_status')
         .eq('phone', phoneNumber)
         .maybeSingle();
 
       let driverId;
       if (!existingDriver) {
+        // Brand-new driver
         driverId = uuidv4();
         const { error } = await supabase
           .from('drivers')
@@ -74,7 +75,15 @@ router.post('/phone',
             created_at: new Date(),
           });
         if (error) throw error;
+      } else if (existingDriver.onboarding_status === 'completed') {
+        // Already fully registered — block
+        return res.status(409).json({
+          success: false,
+          error: 'This phone number is already registered. Please login or use a different number.',
+          alreadyRegistered: true,
+        });
       } else {
+        // Returning driver with incomplete onboarding — allow re-entry
         driverId = existingDriver.id;
       }
 
@@ -176,12 +185,14 @@ router.post('/verify-otp',
         return res.status(400).json({ error: 'OTP has expired. Please request a new OTP.' });
       }
 
-      // Success — clear OTP, mark verified
+      // Success — clear OTP fields. Preserve existing progress if they're returning.
+      const preserveStatus = driver.onboarding_status && driver.onboarding_status !== 'started';
       const { data: updatedDriver, error: updateErr } = await supabase
         .from('drivers')
         .update({
           phone_verified: true,
-          onboarding_status: 'phone_verified',
+          // Only set to 'phone_verified' if this is a new driver with no progress
+          ...(preserveStatus ? {} : { onboarding_status: 'phone_verified' }),
           otp_code: null,
           otp_expiry: null,
           otp_attempts: 0,
@@ -202,6 +213,7 @@ router.post('/verify-otp',
         message: 'Phone number verified successfully',
         token,
         driver: updatedDriver,
+        onboardingStatus: updatedDriver.onboarding_status,
       });
     } catch (error) {
       console.error('OTP verification error:', error);
